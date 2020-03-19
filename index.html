@@ -1,39 +1,555 @@
-<!doctype html>
-<html lang=en >
-<head>
-<meta charset=utf-8 >
-</head>
-<body>
-<script>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,user-scalable=no,minimum-scale=1.0,maximum-scale=1.0"
+    />
+    <meta
+      name="description"
+      content="View the COVID-19 data from John Hopkins University GitHub repository in interactive 3D"
+    />
+    <meta
+      name="keywords"
+      content="Three.js,WebGL,JavaScript,GitHub,FOSS,3D,STEM"
+    />
+    <meta name="version" content="2020-03-18-20" />
 
-const url = "https://api.github.com/repos/ladybug-tools/spider-covid-19-viz-3d/contents/app"
+    <title>COVID-19 Viz 3D</title>
 
-requestFile( url, callbackLatest );
+    <style>
+      #divMessage {
+        background-color: #eee;
+        border-radius: 1rem;
+        left: 5vw;
+        padding: 1rem;
+        position: absolute;
+        top: 50vh;
+        box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.9),
+          0 6px 20px 0 rgba(0, 0, 0, 0.6);
+      }
+    </style>
+  </head>
 
+  <body>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r114/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r114/examples/js/controls/OrbitControls.js"></script>
+    <div id="divMessage">
+      Touch a bar to stop rotation and view the statistics
+    </div>
 
-function callbackLatest( xhr ) {
+    <script>
+      var CANVAS_WIDTH = 800;
+      var CANVAS_HEIGHT = 500;
+      var SIZE = 30;
+      var DEATH_SIZE = 0.5;
+      var RECOVERD_SIZE = 0.45;
+      var CONFIRM_SIZE = 0.4;
+      var NEW_SIZE = 0.45;
+      let lines;
+      let intersected;
+      let group = new THREE.Group();
+      let mesh;
+      let renderer, camera, controls, scene;
 
-	const json = JSON.parse( xhr.target.response )
+      init();
+      animate();
 
-	const name = json.map( json => json.name )[ json.length - 4 ]
-	//console.log( name );
+      function init() {
+        camera = new THREE.PerspectiveCamera(
+          40,
+          CANVAS_WIDTH / CANVAS_HEIGHT,
+          1,
+          1000
+        );
+        camera.position.set(100, 0, 100);
+        camera.up.set(0, 0, 1);
 
-	window.location.href = './app/' + name + location.hash;
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xcce0ff);
+        scene.add(camera);
 
-}
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+        document.body.appendChild(renderer.domElement);
+        renderer.outputEncoding = THREE.sRGBEncoding;
 
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enablePan = false;
+        controls.minDistance = 60;
+        controls.maxDistance = 300;
+        controls.autoRotate = true;
 
-function requestFile( url, callback ) {
+        window.addEventListener("resize", onWindowResize, false);
+        window.addEventListener("orientationchange", onWindowResize, false);
+        window.addEventListener(
+          "keyup",
+          () => (controls.autoRotate = false),
+          false
+        );
 
-	xhr = new XMLHttpRequest();
-	xhr.open( 'GET', url, true );
-	xhr.onerror = ( xhr ) => console.log( 'error:', xhr  );
-	//xhr.onprogress = ( xhr ) => console.log( 'bytes loaded:', xhr.loaded );
-	xhr.onload = callback;
-	xhr.send( null );
+        renderer.domElement.addEventListener(
+          "wheel",
+          () => (controls.autoRotate = false),
+          false
+        );
+        renderer.domElement.addEventListener(
+          "mousedown",
+          () => (controls.autoRotate = false),
+          false
+        );
+        renderer.domElement.addEventListener(
+          "touchstart",
+          () => (controls.autoRotate = false),
+          false
+        );
+        renderer.domElement.addEventListener(
+          "click",
+          () => (controls.autoRotate = false),
+          false
+        );
 
-}
+        document.addEventListener("mousemove", onDocumentMouseMove, false);
+        document.addEventListener("touchstart", onDocumentTouchStart, false);
 
-</script>
-</body>
+        addLights();
+
+        addGlobe(SIZE);
+
+        requestFile("/app/api.json", loadData);
+        requestFile("/app/js/countries_states.geojson", onLoadGeoJson);
+      }
+
+      function onLoadGeoJson(xhr) {
+        let response = xhr.target.response;
+
+        json = JSON.parse(response);
+        //console.log( '', response );
+
+        drawThreeGeo(json, SIZE, "sphere", { color: "#888" });
+      }
+
+      function addLights() {
+        scene.add(new THREE.AmbientLight(0xaaaaaa));
+
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.copy(camera.position);
+        camera.add(pointLight);
+
+        lightDirectional = new THREE.DirectionalLight(0xfffffff, 1);
+        lightDirectional.position.set(-50, -200, 100);
+      }
+
+      function addGlobe(size = 50) {
+        const geometry = new THREE.SphereGeometry(size, 50, 25);
+        geometry.applyMatrix4(new THREE.Matrix4().makeRotationX(0.5 * Math.PI));
+
+        const url = "/app/maps/earth_atmos_4096.jpg";
+        var texture = new THREE.TextureLoader().load(url);
+
+        const material = new THREE.MeshBasicMaterial({
+          color: 0xcce0ff,
+          map: texture
+        });
+        mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+      }
+
+      function requestFile(url, callback) {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", url, true);
+        xhr.onerror = xhr => console.log("error:", xhr);
+        //xhr.onprogress = ( xhr ) => console.log( 'bytes loaded:', xhr.loaded );
+        xhr.onload = callback;
+        xhr.send(null);
+      }
+
+      function loadData(xhr) {
+        group = new THREE.Group();
+        scene.add(group);
+
+        let response = xhr.target.response;
+        lines = JSON.parse(response);
+        lines.forEach((line, index) => addIndicator(line, index));
+      }
+
+      function indecatorBoxItem(line, index, height, size, color) {
+        let p1 = latLonToXYZ(
+          SIZE + 0.5 * height,
+          Number(line.lat),
+          Number(line.lng),
+          index
+        );
+        let p2 = latLonToXYZ(100, Number(line.lat), Number(line.lng), index);
+        let geometry = new THREE.BoxGeometry(size, size, height);
+        // let geometry = new THREE.CylinderBufferGeometry(
+        //   size,
+        //   size,
+        //   height,
+        //   12,
+        //   1,
+        //   true
+        // );
+        // geometry.applyMatrix4(
+        //   new THREE.Matrix4().makeRotationX(-0.5 * Math.PI)
+        // );
+        let material = new THREE.MeshPhongMaterial({ color });
+        mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(p1);
+        mesh.lookAt(p2);
+        mesh.userData = index;
+
+        group.add(mesh);
+      }
+
+      function indecatorSphereItem(line, index, height, size, color) {
+        let p1 = latLonToXYZ(
+          SIZE + 0.5 * (height + height + 2),
+          Number(line.lat),
+          Number(line.lng),
+          index
+        );
+        let p2 = latLonToXYZ(100, Number(line.lat), Number(line.lng), index);
+
+        var geometry = new THREE.SphereBufferGeometry(size, 10, 10);
+        var material = new THREE.MeshBasicMaterial({ color });
+        var mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(p1);
+        mesh.lookAt(p2);
+        mesh.userData = index;
+        group.add(mesh);
+      }
+
+      function addIndicator(line, index) {
+        const height = 0.2 * Math.sqrt(Number(line.confirmed) || 1);
+        const heightDeaths = 0.2 * Math.sqrt(Number(line.deaths) || 1);
+        const heightRecoveries = 0.2 * Math.sqrt(Number(line.recovered) || 1);
+        const heightSphere = 0.2 * Math.sqrt(line.confirmed || 1);
+
+        indecatorBoxItem(line, index, height, CONFIRM_SIZE, "red");
+        indecatorBoxItem(line, index, heightDeaths, DEATH_SIZE, "black");
+        indecatorBoxItem(line, index, heightRecoveries, RECOVERD_SIZE, "green");
+        indecatorSphereItem(line, index, height, 1, "black");
+      }
+
+      function latLonToXYZ(radius, lat, lon, index) {
+        const pi2 = Math.PI / 2;
+
+        lat = (Number(lat) * Math.PI) / 180;
+        lon = (Number(lon) * Math.PI) / 180;
+        //console.log( "lat/lon", lat, lon, index);
+
+        const x = radius * Math.sin(lat + pi2) * Math.cos(lon);
+        const y = radius * Math.sin(lat + pi2) * Math.sin(lon);
+        const z = radius * Math.cos(lat - pi2);
+
+        return new THREE.Vector3(x, y, z);
+      }
+
+      function onDocumentTouchStart(event) {
+        //event.preventDefault();
+
+        event.clientX = event.touches[0].clientX;
+        event.clientY = event.touches[0].clientY;
+
+        onDocumentMouseMove(event);
+      }
+
+      function onDocumentMouseMove(event) {
+        //event.preventDefault();
+
+        const mouse = new THREE.Vector2();
+        mouse.x = (event.clientX / renderer.domElement.clientWidth) * 2 - 1;
+        mouse.y = -(event.clientY / renderer.domElement.clientHeight) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+
+        const intersects = raycaster.intersectObjects(group.children);
+
+        if (intersects.length > 0) {
+          if (intersected !== intersects[0].object) {
+            intersected = intersects[0].object;
+
+            const line = lines[intersected.userData];
+
+            divMessage.hidden = false;
+            divMessage.style.left = event.clientX + "px";
+            divMessage.style.top = event.clientY + "px";
+            divMessage.innerHTML = `
+              country: ${line.country}<br>
+              cases: ${Number(line.confirmed).toLocaleString()}<br>
+              deaths: ${Number(line.deaths).toLocaleString()}<br>
+              recovered: ${Number(line.recovered).toLocaleString()}<br>
+              deaths/cases %: ${(
+                100 *
+                (Number(line.deaths) / Number(line.confirmed))
+              ).toLocaleString()}<br>
+            `;
+          }
+        } else {
+          intersected = null;
+          divMessage.hidden = true;
+          divMessage.innerHTML = "";
+        }
+      }
+
+      function onWindowResize() {
+        camera.aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+        controls.update();
+      }
+
+      function focusMapByName(name) {
+        const country = lines.filter(c => c.country.toLowerCase() === name);
+        if (country) {
+          console.log(country);
+
+          const co = latLonToXYZ(SIZE, country[0].lat, country[0].lng);
+          camera.position.set(co.x, co.y, co.z);
+        }
+      }
+
+      /* Draw GeoJSON
+
+https://github.com/jdomingu/ThreeGeoJSON
+
+Iterates through the latitude and longitude values, converts the values to XYZ coordinates, and draws the geoJSON geometries.
+
+*/
+
+      var x_values = [];
+      var y_values = [];
+      var z_values = [];
+
+      function drawThreeGeo(json, radius, shape, options) {
+        groupLines = new THREE.Group();
+        groupLines.rotation.x = Math.PI / 2;
+        groupLines.rotation.y = Math.PI / 2;
+        scene.add(groupLines);
+
+        var json_geom = createGeometryArray(json);
+        var convertCoordinates = getConversionFunctionName(shape);
+
+        for (var geom_num = 0; geom_num < json_geom.length; geom_num++) {
+          if (json_geom[geom_num].type == "Point") {
+            convertCoordinates(json_geom[geom_num].coordinates, radius);
+            drawParticle(y_values[0], z_values[0], x_values[0], options);
+          } else if (json_geom[geom_num].type == "MultiPoint") {
+            for (
+              var point_num = 0;
+              point_num < json_geom[geom_num].coordinates.length;
+              point_num++
+            ) {
+              convertCoordinates(
+                json_geom[geom_num].coordinates[point_num],
+                radius
+              );
+              drawParticle(y_values[0], z_values[0], x_values[0], options);
+            }
+          } else if (json_geom[geom_num].type == "LineString") {
+            for (
+              var point_num = 0;
+              point_num < json_geom[geom_num].coordinates.length;
+              point_num++
+            ) {
+              convertCoordinates(
+                json_geom[geom_num].coordinates[point_num],
+                radius
+              );
+            }
+            drawLine(y_values, z_values, x_values, options);
+          } else if (json_geom[geom_num].type == "Polygon") {
+            for (
+              var segment_num = 0;
+              segment_num < json_geom[geom_num].coordinates.length;
+              segment_num++
+            ) {
+              for (
+                var point_num = 0;
+                point_num < json_geom[geom_num].coordinates[segment_num].length;
+                point_num++
+              ) {
+                convertCoordinates(
+                  json_geom[geom_num].coordinates[segment_num][point_num],
+                  radius
+                );
+              }
+              drawLine(y_values, z_values, x_values, options);
+            }
+          } else if (json_geom[geom_num].type == "MultiLineString") {
+            for (
+              var segment_num = 0;
+              segment_num < json_geom[geom_num].coordinates.length;
+              segment_num++
+            ) {
+              for (
+                var point_num = 0;
+                point_num < json_geom[geom_num].coordinates[segment_num].length;
+                point_num++
+              ) {
+                convertCoordinates(
+                  json_geom[geom_num].coordinates[segment_num][point_num],
+                  radius
+                );
+              }
+              drawLine(y_values, z_values, x_values);
+            }
+          } else if (json_geom[geom_num].type == "MultiPolygon") {
+            for (
+              var polygon_num = 0;
+              polygon_num < json_geom[geom_num].coordinates.length;
+              polygon_num++
+            ) {
+              for (
+                var segment_num = 0;
+                segment_num <
+                json_geom[geom_num].coordinates[polygon_num].length;
+                segment_num++
+              ) {
+                for (
+                  var point_num = 0;
+                  point_num <
+                  json_geom[geom_num].coordinates[polygon_num][segment_num]
+                    .length;
+                  point_num++
+                ) {
+                  convertCoordinates(
+                    json_geom[geom_num].coordinates[polygon_num][segment_num][
+                      point_num
+                    ],
+                    radius
+                  );
+                }
+                drawLine(y_values, z_values, x_values, options);
+              }
+            }
+          } else {
+            throw new Error("The geoJSON is not valid.");
+          }
+        }
+      }
+
+      function createGeometryArray(json) {
+        var geometry_array = [];
+
+        if (json.type == "Feature") {
+          geometry_array.push(json.geometry);
+        } else if (json.type == "FeatureCollection") {
+          for (
+            var feature_num = 0;
+            feature_num < json.features.length;
+            feature_num++
+          ) {
+            geometry_array.push(json.features[feature_num].geometry);
+          }
+        } else if (json.type == "GeometryCollection") {
+          for (
+            var geom_num = 0;
+            geom_num < json.geometries.length;
+            geom_num++
+          ) {
+            geometry_array.push(json.geometries[geom_num]);
+          }
+        } else {
+          throw new Error("The geoJSON is not valid.");
+        }
+        //alert(geometry_array.length);
+        return geometry_array;
+      }
+
+      function getConversionFunctionName(shape) {
+        var conversionFunctionName;
+
+        if (shape == "sphere") {
+          conversionFunctionName = convertToSphereCoords;
+        } else if (shape == "plane") {
+          conversionFunctionName = convertToPlaneCoords;
+        } else {
+          throw new Error("The shape that you specified is not valid.");
+        }
+        return conversionFunctionName;
+      }
+
+      function convertToSphereCoords(coordinates_array, sphere_radius) {
+        var lon = coordinates_array[0];
+        var lat = coordinates_array[1];
+
+        x_values.push(
+          Math.cos((lat * Math.PI) / 180) *
+            Math.cos((lon * Math.PI) / 180) *
+            sphere_radius
+        );
+        y_values.push(
+          Math.cos((lat * Math.PI) / 180) *
+            Math.sin((lon * Math.PI) / 180) *
+            sphere_radius
+        );
+        z_values.push(Math.sin((lat * Math.PI) / 180) * sphere_radius);
+      }
+
+      function convertToPlaneCoords(coordinates_array, radius) {
+        var lon = coordinates_array[0];
+        var lat = coordinates_array[1];
+        var plane_offset = radius / 2;
+
+        z_values.push((lat / 180) * radius);
+        y_values.push((lon / 180) * radius);
+      }
+
+      function drawParticle(x, y, z, options) {
+        var particle_geom = new THREE.Geometry();
+        particle_geom.vertices.push(new THREE.Vector3(x, y, z));
+
+        var particle_material = new THREE.PointMaterial(options);
+
+        var particle = new THREE.ParticleSystem(
+          particle_geom,
+          particle_material
+        );
+        scene.add(particle);
+
+        clearArrays();
+      }
+
+      function drawLine(x_values, y_values, z_values, options) {
+        var line_geom = new THREE.Geometry();
+        createVertexForEachPoint(line_geom, x_values, y_values, z_values);
+
+        var line_material = new THREE.LineBasicMaterial(options);
+        var line = new THREE.Line(line_geom, line_material);
+        groupLines.add(line);
+
+        clearArrays();
+      }
+
+      function createVertexForEachPoint(
+        object_geometry,
+        values_axis1,
+        values_axis2,
+        values_axis3
+      ) {
+        for (var i = 0; i < values_axis1.length; i++) {
+          object_geometry.vertices.push(
+            new THREE.Vector3(values_axis1[i], values_axis2[i], values_axis3[i])
+          );
+        }
+      }
+
+      function clearArrays() {
+        x_values.length = 0;
+        y_values.length = 0;
+        z_values.length = 0;
+      }
+    </script>
+  </body>
 </html>
